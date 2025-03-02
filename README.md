@@ -1,4 +1,4 @@
-# NVIDIA Jetson AGX Orin AI Agent Manager Setup Guide
+# NVIDIA Jetson AGX Orin AI Agent Manager Setup Guide (NVMe Edition)
 
 ## Password List
 
@@ -12,7 +12,7 @@ Before starting, generate passwords for the following services and replace the p
 
 ## System Overview
 
-This guide will help you set up a complete AI agent workflow system on your NVIDIA Jetson AGX Orin 64GB with ARM64 architecture. The system includes:
+This guide will help you set up a complete AI agent workflow system on your NVIDIA Jetson AGX Orin 64GB with ARM64 architecture, using an external NVMe drive for storage. The system includes:
 
 - Jetson tools (jtop) for monitoring system resources
 - CUDA 12.6 for LLM processing
@@ -25,6 +25,106 @@ This guide will help you set up a complete AI agent workflow system on your NVID
 - OpenWebUI for LLM interaction
 - MaryTTS for text-to-speech with voice cloning capabilities
 - Streamlit for creating web-based interfaces
+
+## 0. Initial NVMe Drive Setup
+
+### Identify the NVMe Drive
+First, check if your NVMe drive is recognized by the system:
+
+```bash
+lsblk
+```
+
+You should see your NVMe drive listed (e.g., `/dev/nvme0n1`).
+
+### Partition and Format the NVMe Drive
+If this is a new drive or you want to start fresh:
+
+```bash
+# Create a new partition table
+sudo parted /dev/nvme0n1 mklabel gpt
+
+# Create a single partition using all space
+sudo parted -a optimal /dev/nvme0n1 mkpart primary ext4 0% 100%
+
+# Format the partition with ext4
+sudo mkfs.ext4 /dev/nvme0n1p1
+
+# Create a mount point
+sudo mkdir -p /mnt/ssd
+```
+
+### Mount the NVMe Drive
+
+```bash
+# Mount the drive
+sudo mount /dev/nvme0n1p1 /mnt/ssd
+
+# Make sure permissions are correct
+sudo chown -R $USER:$USER /mnt/ssd
+sudo chmod -R 755 /mnt/ssd
+```
+
+### Auto-mount on Boot
+To ensure the drive mounts automatically when the system boots:
+
+```bash
+# Get the UUID of the partition
+UUID=$(sudo blkid -s UUID -o value /dev/nvme0n1p1)
+
+# Add entry to fstab
+echo "UUID=$UUID /mnt/ssd ext4 defaults,discard 0 2" | sudo tee -a /etc/fstab
+
+# Test the fstab entry
+sudo mount -a
+```
+
+### Configure Docker to Use the NVMe Drive
+
+First, we need to check if Docker is already installed, and if so, stop and remove it:
+
+```bash
+# Check if Docker is installed
+which docker
+
+# Stop Docker if it's running
+sudo systemctl stop docker docker.socket containerd
+
+# Remove any existing Docker data (be careful!)
+sudo rm -rf /var/lib/docker
+```
+
+Now let's prepare the NVMe drive for Docker:
+
+```bash
+# Create directory for Docker data
+sudo mkdir -p /mnt/ssd/docker-data
+```
+
+Create or modify Docker's daemon.json file to use the NVMe drive:
+
+```bash
+sudo mkdir -p /etc/docker
+cat << 'EOF' | sudo tee /etc/docker/daemon.json
+{
+  "data-root": "/mnt/ssd/docker-data",
+  "runtimes": {
+    "nvidia": {
+      "path": "nvidia-container-runtime",
+      "runtimeArgs": []
+    }
+  },
+  "default-runtime": "nvidia"
+}
+EOF
+```
+
+### Create Project Directory on NVMe Drive
+
+```bash
+# Create the main project directory on the NVMe drive
+mkdir -p /mnt/ssd/ai-agent-system
+```
 
 ## 1. Initial System Setup
 
@@ -82,10 +182,20 @@ source ~/.bashrc
 ### Install Docker
 
 ```bash
+# Remove any old Docker packages first
+sudo apt-get remove -y docker docker-engine docker.io containerd runc
+
+# Install prerequisites
 sudo apt update
 sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+
+# Add Docker's official GPG key
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+
+# Add the repository
 sudo add-apt-repository "deb [arch=arm64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+
+# Install Docker
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io
 ```
@@ -115,8 +225,8 @@ docker compose version
 ### Create Docker Compose File for PostgreSQL
 
 ```bash
-mkdir -p ~/ai-agent-system/postgres
-cd ~/ai-agent-system/postgres
+mkdir -p /mnt/ssd/ai-agent-system/postgres
+cd /mnt/ssd/ai-agent-system/postgres
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -143,7 +253,7 @@ EOF
 ### Start PostgreSQL
 
 ```bash
-cd ~/ai-agent-system/postgres
+cd /mnt/ssd/ai-agent-system/postgres
 docker compose up -d
 ```
 
@@ -154,8 +264,8 @@ Since Supabase's official Docker setup might have compatibility issues with ARM6
 ### Create Docker Compose File for Supabase
 
 ```bash
-mkdir -p ~/ai-agent-system/supabase
-cd ~/ai-agent-system/supabase
+mkdir -p /mnt/ssd/ai-agent-system/supabase
+cd /mnt/ssd/ai-agent-system/supabase
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -197,7 +307,7 @@ EOF
 ### Start Supabase
 
 ```bash
-cd ~/ai-agent-system/supabase
+cd /mnt/ssd/ai-agent-system/supabase
 docker compose up -d
 ```
 
@@ -206,8 +316,8 @@ docker compose up -d
 ### Create Docker Compose File for n8n
 
 ```bash
-mkdir -p ~/ai-agent-system/n8n
-cd ~/ai-agent-system/n8n
+mkdir -p /mnt/ssd/ai-agent-system/n8n
+cd /mnt/ssd/ai-agent-system/n8n
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -239,7 +349,7 @@ EOF
 ### Start n8n
 
 ```bash
-cd ~/ai-agent-system/n8n
+cd /mnt/ssd/ai-agent-system/n8n
 docker compose up -d
 ```
 
@@ -248,8 +358,8 @@ docker compose up -d
 ### Create Docker Compose File for Crawl4AI
 
 ```bash
-mkdir -p ~/ai-agent-system/crawl4ai
-cd ~/ai-agent-system/crawl4ai
+mkdir -p /mnt/ssd/ai-agent-system/crawl4ai
+cd /mnt/ssd/ai-agent-system/crawl4ai
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -272,7 +382,7 @@ EOF
 ### Start Crawl4AI
 
 ```bash
-cd ~/ai-agent-system/crawl4ai
+cd /mnt/ssd/ai-agent-system/crawl4ai
 docker compose up -d
 ```
 
@@ -281,8 +391,8 @@ docker compose up -d
 ### Create Docker Compose File for Ollama
 
 ```bash
-mkdir -p ~/ai-agent-system/ollama
-cd ~/ai-agent-system/ollama
+mkdir -p /mnt/ssd/ai-agent-system/ollama
+cd /mnt/ssd/ai-agent-system/ollama
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -312,7 +422,7 @@ EOF
 ### Start Ollama and Pull deepseek-r1 Model
 
 ```bash
-cd ~/ai-agent-system/ollama
+cd /mnt/ssd/ai-agent-system/ollama
 docker compose up -d
 
 # Wait for Ollama to start, then pull the deepseek-r1 model
@@ -325,8 +435,8 @@ curl -X POST http://localhost:11434/api/pull -d '{"name": "deepseek-coder:6.7b-i
 ### Create Docker Compose File for OpenWebUI
 
 ```bash
-mkdir -p ~/ai-agent-system/openwebui
-cd ~/ai-agent-system/openwebui
+mkdir -p /mnt/ssd/ai-agent-system/openwebui
+cd /mnt/ssd/ai-agent-system/openwebui
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -353,7 +463,7 @@ EOF
 ### Start OpenWebUI
 
 ```bash
-cd ~/ai-agent-system/openwebui
+cd /mnt/ssd/ai-agent-system/openwebui
 docker compose up -d
 ```
 
@@ -362,8 +472,8 @@ docker compose up -d
 ### Create Docker Compose File for MaryTTS
 
 ```bash
-mkdir -p ~/ai-agent-system/marytts
-cd ~/ai-agent-system/marytts
+mkdir -p /mnt/ssd/ai-agent-system/marytts
+cd /mnt/ssd/ai-agent-system/marytts
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -386,7 +496,7 @@ EOF
 ### Start MaryTTS
 
 ```bash
-cd ~/ai-agent-system/marytts
+cd /mnt/ssd/ai-agent-system/marytts
 docker compose up -d
 ```
 
@@ -404,8 +514,8 @@ For voice cloning with MaryTTS, you'll need to train a custom voice model. The e
 ### Create Docker Compose File for Streamlit
 
 ```bash
-mkdir -p ~/ai-agent-system/streamlit
-cd ~/ai-agent-system/streamlit
+mkdir -p /mnt/ssd/ai-agent-system/streamlit
+cd /mnt/ssd/ai-agent-system/streamlit
 
 cat << 'EOF' > Dockerfile
 FROM python:3.9-slim
@@ -571,7 +681,7 @@ EOF
 ### Start Streamlit
 
 ```bash
-cd ~/ai-agent-system/streamlit
+cd /mnt/ssd/ai-agent-system/streamlit
 docker compose up -d
 ```
 
@@ -604,14 +714,14 @@ Follow the interactive setup:
 ### Create a Backup Script
 
 ```bash
-mkdir -p ~/ai-agent-system/backup
-cd ~/ai-agent-system/backup
+mkdir -p /mnt/ssd/ai-agent-system/backup
+cd /mnt/ssd/ai-agent-system/backup
 
 cat << 'EOF' > backup.sh
 #!/bin/bash
 
 # Directory to store backups
-BACKUP_DIR="/home/$(whoami)/ai-agent-system/backup/data"
+BACKUP_DIR="/mnt/ssd/ai-agent-system/backup/data"
 mkdir -p $BACKUP_DIR
 
 # Date format for backup files
@@ -624,11 +734,11 @@ docker exec supabase-db pg_dump -U postgres supabase > $BACKUP_DIR/supabase_$DAT
 
 # Backup n8n data
 echo "Backing up n8n data..."
-tar -czf $BACKUP_DIR/n8n_data_$DATE.tar.gz -C /var/lib/docker/volumes n8n-data
+tar -czf $BACKUP_DIR/n8n_data_$DATE.tar.gz -C /mnt/ssd/docker-data/volumes n8n-data
 
 # Backup MaryTTS voice data
 echo "Backing up MaryTTS voice data..."
-tar -czf $BACKUP_DIR/marytts_data_$DATE.tar.gz -C /var/lib/docker/volumes marytts-data
+tar -czf $BACKUP_DIR/marytts_data_$DATE.tar.gz -C /mnt/ssd/docker-data/volumes marytts-data
 
 # Sync to Google Drive
 echo "Syncing to Google Drive..."
@@ -643,7 +753,7 @@ chmod +x backup.sh
 ### Create a Cron Job for Regular Backups
 
 ```bash
-(crontab -l 2>/dev/null; echo "0 3 * * * /home/$(whoami)/ai-agent-system/backup/backup.sh >> /home/$(whoami)/ai-agent-system/backup/backup.log 2>&1") | crontab -
+(crontab -l 2>/dev/null; echo "0 3 * * * /mnt/ssd/ai-agent-system/backup/backup.sh >> /mnt/ssd/ai-agent-system/backup/backup.log 2>&1") | crontab -
 ```
 
 This sets up a daily backup at 3 AM.
@@ -655,8 +765,8 @@ Let's create a parent agent that can coordinate other agents:
 ### Create Parent Agent Script
 
 ```bash
-mkdir -p ~/ai-agent-system/parent-agent
-cd ~/ai-agent-system/parent-agent
+mkdir -p /mnt/ssd/ai-agent-system/parent-agent
+cd /mnt/ssd/ai-agent-system/parent-agent
 
 cat << 'EOF' > agent_manager.py
 #!/usr/bin/env python3
@@ -1038,6 +1148,7 @@ cat << 'EOF' > agents.json
   }
 }
 EOF
+```
 
 ## 14. IDE-Like Agent Development Environment
 
@@ -1046,8 +1157,8 @@ To provide an IDE-like experience for agent development, let's create a web-base
 ### Setup Code-Server (VS Code in Browser)
 
 ```bash
-mkdir -p ~/ai-agent-system/code-server
-cd ~/ai-agent-system/code-server
+mkdir -p /mnt/ssd/ai-agent-system/code-server
+cd /mnt/ssd/ai-agent-system/code-server
 
 cat << 'EOF' > docker-compose.yml
 version: '3.8'
@@ -1063,7 +1174,7 @@ services:
       - PASSWORD=OPENWEBUI_PASSWORD  # Reuse the OpenWebUI password
     volumes:
       - ./config:/home/coder/.config
-      - ~/ai-agent-system:/home/coder/project
+      - /mnt/ssd/ai-agent-system:/home/coder/project
     command: --auth password --disable-telemetry
 EOF
 
@@ -1074,8 +1185,8 @@ docker compose up -d
 ### Create Agent Development Template
 
 ```bash
-mkdir -p ~/ai-agent-system/templates
-cd ~/ai-agent-system/templates
+mkdir -p /mnt/ssd/ai-agent-system/templates
+cd /mnt/ssd/ai-agent-system/templates
 
 # Create a basic agent template
 cat << 'EOF' > agent_template.py
@@ -1200,8 +1311,8 @@ Let's create a test script that verifies all components are working together:
 ### Create System Test Script
 
 ```bash
-mkdir -p ~/ai-agent-system/tests
-cd ~/ai-agent-system/tests
+mkdir -p /mnt/ssd/ai-agent-system/tests
+cd /mnt/ssd/ai-agent-system/tests
 
 cat << 'EOF' > system_test.py
 #!/usr/bin/env python3
@@ -1315,7 +1426,7 @@ chmod +x system_test.py
 ### Create System Start Script
 
 ```bash
-cd ~/ai-agent-system
+cd /mnt/ssd/ai-agent-system
 
 cat << 'EOF' > start_all.sh
 #!/bin/bash
@@ -1325,27 +1436,27 @@ echo "Starting AI Agent System..."
 
 # Start PostgreSQL
 echo "Starting PostgreSQL..."
-cd ~/ai-agent-system/postgres
+cd /mnt/ssd/ai-agent-system/postgres
 docker compose up -d
 
 # Start Supabase
 echo "Starting Supabase..."
-cd ~/ai-agent-system/supabase
+cd /mnt/ssd/ai-agent-system/supabase
 docker compose up -d
 
 # Start n8n
 echo "Starting n8n..."
-cd ~/ai-agent-system/n8n
+cd /mnt/ssd/ai-agent-system/n8n
 docker compose up -d
 
 # Start Crawl4AI
 echo "Starting Crawl4AI..."
-cd ~/ai-agent-system/crawl4ai
+cd /mnt/ssd/ai-agent-system/crawl4ai
 docker compose up -d
 
 # Start Ollama
 echo "Starting Ollama..."
-cd ~/ai-agent-system/ollama
+cd /mnt/ssd/ai-agent-system/ollama
 docker compose up -d
 
 # Wait for Ollama to be ready
@@ -1354,29 +1465,29 @@ sleep 10
 
 # Start OpenWebUI
 echo "Starting OpenWebUI..."
-cd ~/ai-agent-system/openwebui
+cd /mnt/ssd/ai-agent-system/openwebui
 docker compose up -d
 
 # Start MaryTTS
 echo "Starting MaryTTS..."
-cd ~/ai-agent-system/marytts
+cd /mnt/ssd/ai-agent-system/marytts
 docker compose up -d
 
 # Start Streamlit
 echo "Starting Streamlit..."
-cd ~/ai-agent-system/streamlit
+cd /mnt/ssd/ai-agent-system/streamlit
 docker compose up -d
 
 # Start Code Server
 echo "Starting Code Server IDE..."
-cd ~/ai-agent-system/code-server
+cd /mnt/ssd/ai-agent-system/code-server
 docker compose up -d
 
 echo "All services started."
 echo "Running system test..."
 
 # Run system test
-cd ~/ai-agent-system/tests
+cd /mnt/ssd/ai-agent-system/tests
 python3 system_test.py
 EOF
 
@@ -1388,8 +1499,8 @@ chmod +x start_all.sh
 ### Create Directory for Custom Agent Storage
 
 ```bash
-mkdir -p ~/ai-agent-system/agents
-cd ~/ai-agent-system/agents
+mkdir -p /mnt/ssd/ai-agent-system/agents
+cd /mnt/ssd/ai-agent-system/agents
 
 # Create README
 cat << 'EOF' > README.md
@@ -1399,11 +1510,11 @@ This directory is for storing custom agent implementations.
 
 ## Creating a new agent:
 
-1. Copy the template from `~/ai-agent-system/templates/agent_template.py`
+1. Copy the template from `/mnt/ssd/ai-agent-system/templates/agent_template.py`
 2. Implement the `process()` method with your custom logic
 3. Register the agent using the parent agent manager:
    ```
-   cd ~/ai-agent-system/parent-agent
+   cd /mnt/ssd/ai-agent-system/parent-agent
    ./agent_manager.py create your_agent_name agent_type
    ```
 
@@ -1414,16 +1525,16 @@ This directory is for storing custom agent implementations.
 
 ## Example:
 To create a custom web scraping agent:
-1. Copy the template: `cp ~/ai-agent-system/templates/agent_template.py my_scraper.py`
+1. Copy the template: `cp /mnt/ssd/ai-agent-system/templates/agent_template.py my_scraper.py`
 2. Edit the file to implement your logic
-3. Register: `cd ~/ai-agent-system/parent-agent && ./agent_manager.py create my_scraper web-scraping`
+3. Register: `cd /mnt/ssd/ai-agent-system/parent-agent && ./agent_manager.py create my_scraper web-scraping`
 EOF
 ```
 
 ### Create System Documentation
 
 ```bash
-cd ~/ai-agent-system
+cd /mnt/ssd/ai-agent-system
 
 cat << 'EOF' > README.md
 # AI Agent Manager on NVIDIA Jetson AGX Orin
@@ -1457,29 +1568,55 @@ This system provides a complete AI agent workflow environment with the following
 2. Access the Streamlit dashboard at http://localhost:8501
 3. Create and manage agents using the parent agent manager:
    ```
-   cd ~/ai-agent-system/parent-agent
+   cd /mnt/ssd/ai-agent-system/parent-agent
    ./agent_manager.py create myagent text-generation
    ```
 
 ## Directory Structure:
-- ~/ai-agent-system/postgres: PostgreSQL database
-- ~/ai-agent-system/supabase: Simplified Supabase setup
-- ~/ai-agent-system/n8n: Workflow automation
-- ~/ai-agent-system/crawl4ai: Web scraping service
-- ~/ai-agent-system/ollama: Local LLM inference
-- ~/ai-agent-system/openwebui: Web interface for LLM
-- ~/ai-agent-system/marytts: Text-to-speech service
-- ~/ai-agent-system/streamlit: Web dashboard
-- ~/ai-agent-system/parent-agent: Agent management
-- ~/ai-agent-system/agents: Custom agent implementations
-- ~/ai-agent-system/templates: Agent templates
-- ~/ai-agent-system/backup: Backup system
-- ~/ai-agent-system/tests: System tests
-- ~/ai-agent-system/code-server: Web-based IDE
+- /mnt/ssd/ai-agent-system/postgres: PostgreSQL database
+- /mnt/ssd/ai-agent-system/supabase: Simplified Supabase setup
+- /mnt/ssd/ai-agent-system/n8n: Workflow automation
+- /mnt/ssd/ai-agent-system/crawl4ai: Web scraping service
+- /mnt/ssd/ai-agent-system/ollama: Local LLM inference
+- /mnt/ssd/ai-agent-system/openwebui: Web interface for LLM
+- /mnt/ssd/ai-agent-system/marytts: Text-to-speech service
+- /mnt/ssd/ai-agent-system/streamlit: Web dashboard
+- /mnt/ssd/ai-agent-system/parent-agent: Agent management
+- /mnt/ssd/ai-agent-system/agents: Custom agent implementations
+- /mnt/ssd/ai-agent-system/templates: Agent templates
+- /mnt/ssd/ai-agent-system/backup: Backup system
+- /mnt/ssd/ai-agent-system/tests: System tests
+- /mnt/ssd/ai-agent-system/code-server: Web-based IDE
 
 ## Backup:
 The system is configured to back up to Google Drive daily at 3 AM.
 EOF
+```
+
+### Create Cleanup Script
+
+```bash
+cd /mnt/ssd/ai-agent-system
+
+cat << 'EOF' > cleanup.sh
+#!/bin/bash
+
+echo "Stopping all containers..."
+docker stop $(docker ps -q) 2>/dev/null || true
+
+echo "Removing all containers..."
+docker rm $(docker ps -aq) 2>/dev/null || true
+
+echo "Removing all Docker volumes..."
+docker volume rm $(docker volume ls -q) 2>/dev/null || true
+
+echo "Pruning Docker system (removing unused images, networks, etc.)..."
+docker system prune -af --volumes
+
+echo "Cleanup complete."
+EOF
+
+chmod +x cleanup.sh
 ```
 
 ### Run the System
@@ -1487,17 +1624,78 @@ EOF
 Finally, let's run the entire system:
 
 ```bash
-cd ~/ai-agent-system
+cd /mnt/ssd/ai-agent-system
 ./start_all.sh
+```
+
+## Troubleshooting Guide
+
+### 1. Docker Fails to Start
+
+If Docker fails to start, try:
+
+```bash
+# Check Docker service status
+sudo systemctl status docker
+
+# Restart Docker service
+sudo systemctl restart docker
+
+# Check Docker logs
+sudo journalctl -u docker
+```
+
+### 2. Container Network Issues
+
+If containers can't communicate with each other:
+
+```bash
+# Inspect Docker networks
+docker network ls
+docker network inspect bridge
+
+# Recreate default bridge network
+docker network rm bridge
+docker network create bridge
+```
+
+### 3. NVMe Drive Not Mounting on Boot
+
+If the NVMe drive isn't mounting on boot:
+
+```bash
+# Verify the UUID in fstab
+sudo blkid
+cat /etc/fstab
+
+# Try manual mount
+sudo mount -a
+```
+
+### 4. GPU Issues with Ollama
+
+If Ollama can't access the GPU:
+
+```bash
+# Check NVIDIA runtime
+sudo docker info | grep -i runtime
+
+# Verify NVIDIA drivers
+nvidia-smi
+
+# Make sure nvidia-container-toolkit is installed
+sudo apt-get install -y nvidia-container-toolkit
+sudo systemctl restart docker
 ```
 
 ## Summary
 
-Congratulations! You've set up a complete AI Agent Manager on your NVIDIA Jetson AGX Orin. This system includes:
+Congratulations! You've set up a complete AI Agent Manager on your NVIDIA Jetson AGX Orin using an external NVMe drive. This system includes:
 
-1. **Hardware Monitoring**: jtop for Jetson system monitoring
-2. **CUDA 12.6**: Configured for optimal LLM processing
-3. **Core Services**:
+1. **NVMe Integration**: Configured and mounted external storage for better performance
+2. **Hardware Monitoring**: jtop for Jetson system monitoring
+3. **CUDA 12.6**: Configured for optimal LLM processing
+4. **Core Services**:
    - PostgreSQL for database storage
    - Docker for containerization
    - n8n.io for workflow automation
@@ -1508,20 +1706,21 @@ Congratulations! You've set up a complete AI Agent Manager on your NVIDIA Jetson
    - MaryTTS for text-to-speech with voice cloning
    - Streamlit for web-based interfaces
 
-4. **Agent Development**:
+5. **Agent Development**:
    - Parent agent for managing specialized agents
    - Code-Server for IDE-like development
    - Agent templates for quick development
    - System for creating, managing, and running agents
 
-5. **Backup System**:
+6. **Backup System**:
    - Google Drive integration for cloud backup
    - Daily automated backups
 
-6. **System Management**:
+7. **System Management**:
    - Start-up script for all services
+   - Cleanup script for resetting the environment
    - System testing and verification
 
-The system is designed to be self-hosted on your Jetson hardware, with all services running locally. This setup provides a complete environment for developing and running AI agents that can handle tasks like text generation, web scraping, and text-to-speech conversion.
+The system is designed to be self-hosted on your Jetson hardware, with all services running locally and data stored on the external NVMe drive for better performance. This setup provides a complete environment for developing and running AI agents that can handle tasks like text generation, web scraping, and text-to-speech conversion.
 
-To get started, navigate to http://localhost:8501 to access the Streamlit dashboard for managing your agents
+To get started, navigate to http://localhost:8501 to access the Streamlit dashboard for managing your agents.
